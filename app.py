@@ -12,7 +12,10 @@ import llm
 import calendar
 import pymysql
 from datetime import datetime
+import logging
 
+from langchain.chat_models import AzureChatOpenAI
+from langchain.schema import HumanMessage, SystemMessage
 app = Flask(__name__)
 CORS(app)  # Enable cross-origin requests
 
@@ -169,10 +172,8 @@ def do(param):
 
 def save_to_db(user_id, nutrition_info):
     connection = create_db_connection()
-    print(1)
     try:
         with connection.cursor() as cursor:
-            print(2)
             sql = """
                 INSERT INTO FOOD (ID, DATE, FOOD_NAME, FOOD_PT, FOOD_FAT, FOOD_CH, FOOD_KCAL)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
@@ -568,6 +569,7 @@ def get_user_nutritional_needs(user_id):
         connection.close()
 
 def get_daily_totals(user_id, date):
+   
     connection = pymysql.connect(**db_config)
     try:
         with connection.cursor() as cursor:
@@ -635,12 +637,101 @@ def get_monthly_data(year, month, user_id):
     finally:
         connection.close()
 
+def get_user_nutritional_needs(user_id):
+    connection = pymysql.connect(**db_config)
+    try:
+        with connection.cursor() as cursor:
+            sql = "SELECT BODY_WEIGHT, RDI FROM USER WHERE ID = %s"
+            cursor.execute(sql, (user_id,))
+            result = cursor.fetchone()
+            if result:
+                body_weight, rdi = result
+                return body_weight, rdi
+            else:
+                return None
+    except pymysql.MySQLError as e:
+        logging.error(f"Database error: {e}")
+        return None
+    finally:
+        connection.close()
+
+def get_daily_totals(user_id, date):
+    connection = pymysql.connect(**db_config)
+    try:
+        with connection.cursor() as cursor:
+            sql = "SELECT CARBO, PROTEIN, FAT, RD_CARBO, RD_PROTEIN, RD_FAT FROM USER_NT WHERE ID = %s AND DATE = %s"
+            cursor.execute(sql, (user_id, date))
+            result = cursor.fetchone()
+            if result:
+                return result
+            else:
+                return None
+    except pymysql.MySQLError as e:
+        logging.error(f"Database error: {e}")
+        return None
+    finally:
+        connection.close()
+
+def get_monthly_data(year, month, user_id):
+    connection = pymysql.connect(**db_config)
+    try:
+        with connection.cursor() as cursor:
+            sql = """
+                SELECT DATE, FOOD_INDEX, FOOD_NAME, FOOD_PT, FOOD_FAT, FOOD_CH, FOOD_KCAL
+                FROM FOOD
+                WHERE YEAR(DATE) = %s AND MONTH(DATE) = %s AND ID = %s
+                ORDER BY DATE
+            """
+            cursor.execute(sql, (year, month, user_id))
+            results = cursor.fetchall()
+
+            num_days = calendar.monthrange(year, month)[1]  # 해당 월의 일수 계산
+            foods_list = [[] for _ in range(num_days)]  # 각 날짜별 음식 리스트
+            percentages_list = [{} for _ in range(num_days)]  # 각 날짜별 백분율 리스트
+
+            for row in results:
+                day = row[0].day - 1  # 0-based index for lists
+                food_info = {
+                    "food_index": row[1],
+                    "food_name": row[2],
+                    "protein": row[3],
+                    "fat": row[4],
+                    "carbohydrates": row[5],
+                    "calories": row[6]
+                }
+                foods_list[day].append(food_info)
+
+            # Add daily percentages
+            for day in range(num_days):
+                date_str = f"{year}-{str(month).zfill(2)}-{str(day+1).zfill(2)}"  # 1-based day for dates
+                daily_totals = get_daily_totals(user_id, date_str)
+             
+                if daily_totals:
+                    carb_total, protein_total, fat_total, rd_carb, rd_protein, rd_fat = daily_totals
+                    logging.debug(f"Daily Totals for {date_str}: {carb_total}, {protein_total}, {fat_total}, {rd_carb}, {rd_protein}, {rd_fat}")
+                    
+                    percentages_list[day] = {
+                        "carbohydrates_percentage": round((carb_total / rd_carb) * 100, 1) if rd_carb > 0 else 0,
+                        "protein_percentage": round((protein_total / rd_protein) * 100, 1) if rd_protein > 0 else 0,
+                        "fat_percentage": round((fat_total / rd_fat) * 100, 1) if rd_fat > 0 else 0
+                    }
+
+            return {
+                "foods": foods_list,
+                "percentages": percentages_list
+            }
+    except pymysql.MySQLError as e:
+        logging.error(f"Database error: {e}")
+        return {"error": "Database error"}
+    finally:
+        connection.close()
+
 @app.route('/api/food/quarterly', methods=['POST'])
 def get_quarterly_food():
     data = request.json
     year = data.get("year")
-    start_month = data.get("month")
-    user_id= data.get("UID")
+    start_month= data.get("month")
+    user_id = data.get("UID")
 
     if not year or not start_month or not user_id:
         return jsonify({"error": "Year, start month, and user_id are required"}), 400
@@ -661,6 +752,213 @@ def get_quarterly_food():
         quarterly_data[f"{current_year}-{str(month).zfill(2)}"] = monthly_data
 
     return jsonify(quarterly_data)
+
+def get_advice(carbohydrates_percentage, protein_percentage, fat_percentage):
+    try:
+        # Chat API 호출
+        messages = [
+            SystemMessage(content="You are a nutrition expert providing dietary advice based on user's nutrient intake.Give 5 sentences of advice in Korean"),
+            HumanMessage(content=f"Here are my monthly nutrient intake percentages:\n"
+                                 f"Carbohydrates: {carbohydrates_percentage}%\n"
+                                 f"Protein: {protein_percentage}%\n"
+                                 f"Fat: {fat_percentage}%\n"
+                                 f"Please provide advice on how to improve my diet")
+        ]
+        
+        response = model(messages)
+        
+        # 응답 객체의 내용을 로그로 출력
+        logging.debug(f"LLM Response Object: {response}")
+        
+        # 응답 내용을 추출
+        response_content = response[0].content if isinstance(response, list) else response.content
+        logging.debug(f"LLM Response Content: {response_content}")  # LLM 응답을 콘솔에 출력
+        return response_content
+    except Exception as e:
+        logging.error(f"Error in get_advice: {e}")
+        logging.debug(f"Carbohydrates: {carbohydrates_percentage}, Protein: {protein_percentage}, Fat: {fat_percentage}")  # 입력 데이터 디버깅
+        return {"error": f"Failed to get advice from LLM: {str(e)}"}
+    
+@app.route('/api/food/advice', methods=['POST'])
+def get_advice_route():
+    data = request.json
+    year = data.get("year")
+    month = data.get("month")
+    user_id  = data.get("UID")
+    if not year or not month or not user_id:
+        return jsonify({"error": "Year, month, and user_id are required"}), 400
+
+    try:
+        year = int(year)
+        month = int(month)
+    
+        if month < 1 or month > 12:
+            return jsonify({"error": "Invalid month. Please enter a value between 1 and 12."}), 400
+    except ValueError:
+        return jsonify({"error": "Year and month must be integers."}), 400
+
+    # 현재 달의 데이터를 가져옵니다
+    monthly_data = get_monthly_data(year, month, user_id)
+
+    if "error" in monthly_data:
+        logging.error(f"Failed to get monthly data: {monthly_data['error']}")
+        return jsonify(monthly_data), 500
+    # print("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@")
+    # print(monthly_data)
+    percentages_list = monthly_data['percentages']
+
+    # 한 달치 평균 계산
+    total_carbs = 0
+    total_protein = 0
+    total_fat = 0
+    count = 0
+    # print("###################################")
+    # print(percentages_list)
+    for day_data in percentages_list:
+        if day_data:  # 빈 데이터는 건너뜀
+            total_carbs += day_data.get('carbohydrates_percentage', 0)
+            total_protein += day_data.get('protein_percentage', 0)
+            total_fat += day_data.get('fat_percentage', 0)
+            count += 1
+
+    if count == 0:
+        logging.error("No valid data to calculate averages")
+        return jsonify({"error": "No valid data to calculate averages"}), 404
+    print(2)
+
+    average_carbs = total_carbs / count
+    average_protein = total_protein / count
+    average_fat = total_fat / count
+
+    averages = {
+        "average_carbohydrates_percentage": round(average_carbs, 1),
+        "average_protein_percentage": round(average_protein, 1),
+        "average_fat_percentage": round(average_fat, 1)
+    }
+    print(3)
+
+    # LLM을 통해 조언을 받습니다
+    advice = get_advice(averages["average_carbohydrates_percentage"],
+                        averages["average_protein_percentage"],
+                        averages["average_fat_percentage"])
+    print(4)
+
+    # 콘솔에 출력
+    logging.debug(f"LLM Advice: {advice}")
+
+    return jsonify({"averages": averages, "advice": advice})
+
+def get_user_nutritional_needs(user_id):
+    connection = pymysql.connect(**db_config)
+    try:
+        with connection.cursor() as cursor:
+            sql = "SELECT BODY_WEIGHT, RDI FROM USER WHERE ID = %s"
+            cursor.execute(sql, (user_id,))
+            result = cursor.fetchone()
+            if result:
+                body_weight, rdi = result
+                return body_weight, rdi
+            else:
+                return None
+    except pymysql.MySQLError as e:
+        logging.error(f"Database error: {e}")
+        return None
+    finally:
+        connection.close()
+
+def get_daily_totals(user_id, date):
+    connection = pymysql.connect(**db_config)
+    try:
+        with connection.cursor() as cursor:
+            sql = "SELECT CARBO, PROTEIN, FAT, RD_CARBO, RD_PROTEIN, RD_FAT FROM USER_NT WHERE ID = %s AND DATE = %s"
+            cursor.execute(sql, (user_id, date))
+            result = cursor.fetchone()
+            if result:
+                return result
+            else:
+                return None
+    except pymysql.MySQLError as e:
+        logging.error(f"Database error: {e}")
+        return None
+    finally:
+        connection.close()
+
+def get_foods_by_date(year, month, day, user_id):
+    connection = pymysql.connect(**db_config)
+    try:
+        with connection.cursor() as cursor:
+            sql = """
+                SELECT DATE, FOOD_INDEX, FOOD_NAME, FOOD_PT, FOOD_FAT, FOOD_CH, FOOD_KCAL
+                FROM FOOD
+                WHERE YEAR(DATE) = %s AND MONTH(DATE) = %s AND DAY(DATE) = %s AND ID = %s
+                ORDER BY DATE
+            """
+            cursor.execute(sql, (year, month, day, user_id))
+            results = cursor.fetchall()
+            foods_list = []  # 특정 날짜의 음식 리스트
+            percentages = {"carbohydrates_percentage": 0, "protein_percentage": 0, "fat_percentage": 0}  # 기본값 0으로 설정
+
+            for row in results:
+                food_info = {
+                    "food_index": row[1],
+                    "food_name": row[2],
+                    "protein": row[3],
+                    "fat": row[4],
+                    "carbohydrates": row[5],
+                    "calories": row[6]
+                }
+                foods_list.append(food_info)
+
+            # Add daily percentages
+            date_str = f"{year}-{str(month).zfill(2)}-{str(day).zfill(2)}"  # 날짜 문자열
+            daily_totals = get_daily_totals(user_id, date_str)
+            if daily_totals:
+                carb_total, protein_total, fat_total, rd_carb, rd_protein, rd_fat = daily_totals
+                percentages = {
+                    "carbohydrates_percentage": round((carb_total / rd_carb) * 100, 1) if rd_carb > 0 else 0,
+                    "protein_percentage": round((protein_total / rd_protein) * 100, 1) if rd_protein > 0 else 0,
+                    "fat_percentage": round((fat_total / rd_fat) * 100, 1) if rd_fat > 0 else 0
+                }
+
+            return {
+                "foods": foods_list,
+                "percentages": percentages
+            }
+    except pymysql.MySQLError as e:
+        logging.error(f"Database error: {e}")
+        return {"error": "Database error"}
+    finally:
+        connection.close()
+
+@app.route('/api/food/get_day', methods=['POST'])
+def get_day_food():
+    data = request.json
+    year = data.get('year')
+    month = data.get('month')
+    day = data.get('day')
+    user_id = data.get('UID')
+    print(data)
+    if not year or not month or not day or not user_id:
+        return jsonify({"error": "Year, month, day, and user_id are required"}), 400
+    print(00)
+    try:
+        year = int(year)
+        month = int(month)
+        day = int(day)
+        print(year,month,day)
+        if month < 1 or month > 12 or day < 1 or day > 31:
+            return jsonify({"error": "Invalid month or day. Please enter valid values."}), 400
+    except ValueError:
+        return jsonify({"error": "Year, month, and day must be integers."}), 400
+
+    daily_data = get_foods_by_date(year, month, day, user_id)
+    if "error" in daily_data:
+        logging.error(f"Failed to get daily data: {daily_data['error']}")
+        return jsonify(daily_data), 500
+
+    return jsonify(daily_data)
+
+
 
 if __name__ == "__main__":
     print("Starting Flask application")  # 디버깅 메시지
