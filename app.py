@@ -363,7 +363,6 @@ def update_food():
     finally:
         connection.close()
 
-
 @app.route("/api/register", methods=["GET", "POST", "PUT"])
 def register():
     if request.method == "GET":
@@ -379,7 +378,7 @@ def register():
             print(2)
             cursor = connection.cursor()
             query_nutrients = (
-                """SELECT RD_PROTEIN1, RD_CARBO1, RD_FAT1 FROM USER WHERE ID=%s"""
+                """SELECT RD_PROTEIN2, RD_CARBO2, RD_FAT2 FROM USER WHERE ID=%s"""
             )
             cursor.execute(query_nutrients, (user_id,))
             nutrients_result = cursor.fetchone()
@@ -392,9 +391,9 @@ def register():
             return (
                 jsonify(
                     {
-                        "RD_PROTEIN1": rd_protein,
-                        "RD_CARBO1": rd_carbo,
-                        "RD_FAT1": rd_fat,
+                        "RD_PROTEIN2": rd_protein,
+                        "RD_CARBO2": rd_carbo,
+                        "RD_FAT2": rd_fat,
                     }
                 ),
                 200,
@@ -430,8 +429,9 @@ def register():
                 data["id"],
             )
             cursor.execute(query_user, values_user)
-
-            query_nt = """UPDATE USER SET RD_PROTEIN1=%s, RD_CARBO1=%s, RD_FAT1=%s WHERE ID=%s"""
+            print(data)
+            print(data["rd_protein"])
+            query_nt = """UPDATE USER SET RD_PROTEIN2=%s, RD_CARBO2=%s, RD_FAT2=%s WHERE ID=%s"""
             values_nt = (
                 data["rd_protein"],
                 data["rd_carbo"],
@@ -440,7 +440,7 @@ def register():
             )
             cursor.execute(query_nt, values_nt)
         else:
-            query_user = """INSERT INTO USER (ID, PASSWORD, BODY_WEIGHT, HEIGHT, AGE, GENDER, ACTIVITY, RDI, RD_PROTEIN1, RD_FAT1, RD_CARBO1) 
+            query_user = """INSERT INTO USER (ID, PASSWORD, BODY_WEIGHT, HEIGHT, AGE, GENDER, ACTIVITY, RDI, RD_PROTEIN2, RD_FAT2, RD_CARBO2) 
                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s,%s,%s,%s)"""
             values_user = (
                 data["id"],
@@ -453,13 +453,13 @@ def register():
                 None,  # RDI 값을 기본값으로 설정 (필요에 따라 계산 후 설정 가능)
                 None,
                 None,
-                None
+                None,
             )
             print(1)
             cursor.execute(query_user, values_user)
             print(2)
 
-            # query_nt = """INSERT INTO USER (ID, RD_PROTEIN1, RD_CARBO1, RD_FAT1) 
+            # query_nt = """INSERT INTO USER (ID, RD_PROTEIN1, RD_CARBO1, RD_FAT1)
             #               VALUES (%s, %s, %s, %s)"""
             # values_nt = (
             #     data["id"],
@@ -1058,21 +1058,23 @@ def get_day_food():
 
     return jsonify(daily_data)
 
-UPLOAD_FOLDER = '/path/to/upload'  # 실제 경로로 설정
+
+UPLOAD_FOLDER = "/path/to/upload"  # 실제 경로로 설정
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
-    
-@app.route('/api/upload', methods=['POST'])
+
+
+@app.route("/api/upload", methods=["POST"])
 def upload():
-    user_id = request.form.get('user_id')
+    user_id = request.form.get("user_id")
     app.logger.debug(f"User ID: {user_id}")
 
-    if 'file' not in request.files:
+    if "file" not in request.files:
         app.logger.error("No file part")
         return jsonify({"error": "No file part"}), 400
 
-    file = request.files['file']
-    if file.filename == '':
+    file = request.files["file"]
+    if file.filename == "":
         app.logger.error("No selected file")
         return jsonify({"error": "No selected file"}), 400
 
@@ -1080,7 +1082,7 @@ def upload():
         file_extension = os.path.splitext(file.filename)[1]
         safe_filename = f"{uuid.uuid4().hex}{file_extension}"
         file_path = os.path.join(UPLOAD_FOLDER, safe_filename)
-        
+
         try:
             file.save(file_path)
             app.logger.info(f"File saved to {file_path}")
@@ -1095,7 +1097,7 @@ def upload():
             app.logger.error(f"Error processing file: {e}")
             return jsonify({"error": "Error processing file", "details": str(e)}), 500
 
-        if 'error' in nutrition_info:
+        if "error" in nutrition_info:
             app.logger.error(f"Nutrition info error: {nutrition_info}")
             return jsonify(nutrition_info), 400
 
@@ -1104,9 +1106,13 @@ def upload():
             app.logger.info("Data saved to database")
         except Exception as e:
             app.logger.error(f"Error saving to database: {e}")
-            return jsonify({"error": "Error saving to database", "details": str(e)}), 500
+            return (
+                jsonify({"error": "Error saving to database", "details": str(e)}),
+                500,
+            )
 
         return jsonify(nutrition_info)
+
 
 if __name__ == "__main__":
     print("Starting Flask application")  # 디버깅 메시지
