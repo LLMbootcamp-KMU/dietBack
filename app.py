@@ -11,6 +11,7 @@ import os
 import llm
 import calendar
 import pymysql
+import logging
 from datetime import datetime
 
 app = Flask(__name__)
