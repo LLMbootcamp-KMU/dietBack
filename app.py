@@ -1058,8 +1058,7 @@ def get_day_food():
 
     return jsonify(daily_data)
 
-
-UPLOAD_FOLDER = "/path/to/upload"  # 실제 경로로 설정
+UPLOAD_FOLDER = './path/to/upload'  # 실제 경로로 설정
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
@@ -1102,7 +1101,7 @@ def upload():
             return jsonify(nutrition_info), 400
 
         try:
-            save_to_db(user_id, nutrition_info)
+            # save_to_db(user_id, nutrition_info)
             app.logger.info("Data saved to database")
         except Exception as e:
             app.logger.error(f"Error saving to database: {e}")
