@@ -440,8 +440,8 @@ def register():
             )
             cursor.execute(query_nt, values_nt)
         else:
-            query_user = """INSERT INTO USER (ID, PASSWORD, BODY_WEIGHT, HEIGHT, AGE, GENDER, ACTIVITY, RDI) 
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"""
+            query_user = """INSERT INTO USER (ID, PASSWORD, BODY_WEIGHT, HEIGHT, AGE, GENDER, ACTIVITY, RDI, RD_PROTEIN1, RD_FAT1, RD_CARBO1) 
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s,%s,%s,%s)"""
             values_user = (
                 data["id"],
                 data["pw"],
@@ -451,18 +451,23 @@ def register():
                 data["gender"],
                 data["activity"],
                 None,  # RDI 값을 기본값으로 설정 (필요에 따라 계산 후 설정 가능)
+                None,
+                None,
+                None
             )
+            print(1)
             cursor.execute(query_user, values_user)
+            print(2)
 
-            query_nt = """INSERT INTO USER (ID, RD_PROTEIN1, RD_CARBO1, RD_FAT1) 
-                          VALUES (%s, %s, %s, %s)"""
-            values_nt = (
-                data["id"],
-                data["rd_protein"],
-                data["rd_carbo"],
-                data["rd_fat"],
-            )
-            cursor.execute(query_nt, values_nt)
+            # query_nt = """INSERT INTO USER (ID, RD_PROTEIN1, RD_CARBO1, RD_FAT1) 
+            #               VALUES (%s, %s, %s, %s)"""
+            # values_nt = (
+            #     data["id"],
+            #     data["rd_protein"],
+            #     data["rd_carbo"],
+            #     data["rd_fat"],
+            # )
+            # cursor.execute(query_nt, values_nt)
 
         connection.commit()
         return jsonify({"message": "User registered successfully"}), 201
