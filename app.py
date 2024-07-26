@@ -16,6 +16,7 @@ import logging
 
 from langchain.chat_models import AzureChatOpenAI
 from langchain.schema import HumanMessage, SystemMessage
+
 app = Flask(__name__)
 CORS(app)  # Enable cross-origin requests
 
@@ -142,7 +143,7 @@ model = AzureChatOpenAI(
 
 
 class NutritionInfo(BaseModel):
-    food_name:str = Field(description="The food name")
+    food_name: str = Field(description="The food name")
     calorie: str = Field(description="The amount of Calories")
     carbohydrate: str = Field(description="The amount of Carbohydrate")
     protein: str = Field(description="The amount of Protein")
@@ -363,9 +364,51 @@ def update_food():
         connection.close()
 
 
-@app.route("/api/register", methods=["POST", "PUT"])
+@app.route("/api/register", methods=["GET", "POST", "PUT"])
 def register():
+    if request.method == "GET":
+        user_id = request.args.get("id")
+        if not user_id:
+            return jsonify({"error": "User ID is required"}), 400
+        print(1)
+        connection = create_db_connection()
+        if connection is None:
+            return jsonify({"error": "Database connection failed"}), 500
+
+        try:
+            print(2)
+            cursor = connection.cursor()
+            query_nutrients = (
+                """SELECT RD_PROTEIN, RD_CARBO, RD_FAT FROM USER WHERE ID=%s"""
+            )
+            cursor.execute(query_nutrients, (user_id,))
+            nutrients_result = cursor.fetchone()
+            print(3)
+
+            if nutrients_result is None:
+                return jsonify({"error": "User NT not found"}), 404
+            print(4)
+            rd_protein, rd_carbo, rd_fat = nutrients_result
+            return (
+                jsonify(
+                    {
+                        "RD_PROTEIN": rd_protein,
+                        "RD_CARBO": rd_carbo,
+                        "RD_FAT": rd_fat,
+                    }
+                ),
+                200,
+            )
+        except Error as e:
+            print(f"Database query error: {e}")
+            return jsonify({"error": "Database query failed"}), 500
+        finally:
+            if connection.is_connected():
+                cursor.close()
+                connection.close()
+
     data = request.json
+
     if not data or "id" not in data or "pw" not in data:
         return jsonify({"error": "Invalid input"}), 400
 
@@ -374,12 +417,32 @@ def register():
         return jsonify({"error": "Database connection failed"}), 500
 
     try:
-        cursor = connection.cursor(dictionary=True)
-        if request.method == "POST":
-            # POST 요청: 새로운 사용자 등록
-            query = """INSERT INTO USER (ID, PASSWORD, BODY_WEIGHT, HEIGHT, AGE, GENDER, ACTIVITY, RDI) 
-                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"""
-            values = (
+        cursor = connection.cursor()
+
+        if request.method == "PUT":
+            query_user = """UPDATE USER SET PASSWORD=%s, BODY_WEIGHT=%s, HEIGHT=%s, AGE=%s, ACTIVITY=%s WHERE ID=%s"""
+            values_user = (
+                data["pw"],
+                data["bodyweight"],
+                data["height"],
+                data["age"],
+                data["activity"],
+                data["id"],
+            )
+            cursor.execute(query_user, values_user)
+
+            query_nt = """UPDATE USER_NT SET RD_PROTEIN=%s, RD_CARBO=%s, RD_FAT=%s WHERE ID=%s"""
+            values_nt = (
+                data["rd_protein"],
+                data["rd_carbo"],
+                data["rd_fat"],
+                data["id"],
+            )
+            cursor.execute(query_nt, values_nt)
+        else:
+            query_user = """INSERT INTO USER (ID, PASSWORD, BODY_WEIGHT, HEIGHT, AGE, GENDER, ACTIVITY, RDI) 
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"""
+            values_user = (
                 data["id"],
                 data["pw"],
                 data["bodyweight"],
@@ -389,64 +452,20 @@ def register():
                 data["activity"],
                 None,  # RDI 값을 기본값으로 설정 (필요에 따라 계산 후 설정 가능)
             )
-            cursor.execute(query, values)
-            connection.commit()
-            return jsonify({"message": "User registered successfully"}), 201
+            cursor.execute(query_user, values_user)
 
-        elif request.method == "PUT":
-            # Check if the user exists
-            check_user_query = "SELECT * FROM USER WHERE ID = %s"
-            cursor.execute(check_user_query, (data["id"],))
-            existing_user = cursor.fetchone()
-
-            if not existing_user:
-                return jsonify({"error": "User not found"}), 404
-
-            # PUT 요청: 기존 사용자 정보 업데이트
-            query = """UPDATE USER SET PASSWORD=%s, BODY_WEIGHT=%s, HEIGHT=%s, AGE=%s, GENDER=%s, ACTIVITY=%s
-                       WHERE ID=%s"""
-            values = (
-                data["pw"],
-                data["bodyweight"],
-                data["height"],
-                data["age"],
-                data["gender"],
-                data["activity"],
+            query_nt = """INSERT INTO USER_NT (ID, RD_PROTEIN, RD_CARBO, RD_FAT) 
+                          VALUES (%s, %s, %s, %s)"""
+            values_nt = (
                 data["id"],
+                data["rd_protein"],
+                data["rd_carbo"],
+                data["rd_fat"],
             )
-            cursor.execute(query, values)
-            connection.commit()
+            cursor.execute(query_nt, values_nt)
 
-            # Check if any row was actually updated
-            if cursor.rowcount == 0:
-                return (
-                    jsonify({"message": "No changes made to the user information"}),
-                    200,
-                )
-
-            # USER_NT 테이블에서 RD_PROTEIN, RD_CARBO, RD_FAT 값을 가져옴
-            query_nutrients = (
-                """SELECT RD_PROTEIN, RD_CARBO, RD_FAT FROM USER_NT WHERE ID=%s"""
-            )
-            cursor.execute(query_nutrients, (data["id"],))
-            nutrients_result = cursor.fetchone()
-
-            if nutrients_result is None:
-                return jsonify({"error": "User NT not found"}), 404
-
-            rd_protein, rd_carbo, rd_fat = nutrients_result
-            return (
-                jsonify(
-                    {
-                        "message": "User updated successfully",
-                        "RD_PROTEIN": rd_protein,
-                        "RD_CARBO": rd_carbo,
-                        "RD_FAT": rd_fat,
-                    }
-                ),
-                200,
-            )
-
+        connection.commit()
+        return jsonify({"message": "User registered successfully"}), 201
     except Error as e:
         print(f"Database query error: {e}")
         return jsonify({"error": "Database query failed"}), 500
@@ -568,8 +587,9 @@ def get_user_nutritional_needs(user_id):
     finally:
         connection.close()
 
+
 def get_daily_totals(user_id, date):
-   
+
     connection = pymysql.connect(**db_config)
     try:
         with connection.cursor() as cursor:
@@ -585,6 +605,7 @@ def get_daily_totals(user_id, date):
         return None
     finally:
         connection.close()
+
 
 def get_monthly_data(year, month, user_id):
     connection = pymysql.connect(**db_config)
@@ -611,7 +632,7 @@ def get_monthly_data(year, month, user_id):
                     "protein": row[3],
                     "fat": row[4],
                     "carbohydrates": row[5],
-                    "calories": row[6]
+                    "calories": row[6],
                 }
                 foods_list[day].append(food_info)
 
@@ -620,22 +641,35 @@ def get_monthly_data(year, month, user_id):
                 date_str = f"{year}-{str(month).zfill(2)}-{str(day+1).zfill(2)}"  # 1-based day for dates
                 daily_totals = get_daily_totals(user_id, date_str)
                 if daily_totals:
-                    carb_total, protein_total, fat_total, rd_carb, rd_protein, rd_fat = daily_totals
+                    (
+                        carb_total,
+                        protein_total,
+                        fat_total,
+                        rd_carb,
+                        rd_protein,
+                        rd_fat,
+                    ) = daily_totals
                     percentages_list[day] = {
-                        "carbohydrates_percentage": round((carb_total / rd_carb) * 100, 1) if rd_carb > 0 else 0,
-                        "protein_percentage": round((protein_total / rd_protein) * 100, 1) if rd_protein > 0 else 0,
-                        "fat_percentage": round((fat_total / rd_fat) * 100, 1) if rd_fat > 0 else 0
+                        "carbohydrates_percentage": (
+                            round((carb_total / rd_carb) * 100, 1) if rd_carb > 0 else 0
+                        ),
+                        "protein_percentage": (
+                            round((protein_total / rd_protein) * 100, 1)
+                            if rd_protein > 0
+                            else 0
+                        ),
+                        "fat_percentage": (
+                            round((fat_total / rd_fat) * 100, 1) if rd_fat > 0 else 0
+                        ),
                     }
 
-            return {
-                "foods": foods_list,
-                "percentages": percentages_list
-            }
+            return {"foods": foods_list, "percentages": percentages_list}
     except pymysql.MySQLError as e:
         logging.error(f"Database error: {e}")
         return {"error": "Database error"}
     finally:
         connection.close()
+
 
 def get_user_nutritional_needs(user_id):
     connection = pymysql.connect(**db_config)
@@ -655,6 +689,7 @@ def get_user_nutritional_needs(user_id):
     finally:
         connection.close()
 
+
 def get_daily_totals(user_id, date):
     connection = pymysql.connect(**db_config)
     try:
@@ -671,6 +706,7 @@ def get_daily_totals(user_id, date):
         return None
     finally:
         connection.close()
+
 
 def get_monthly_data(year, month, user_id):
     connection = pymysql.connect(**db_config)
@@ -697,7 +733,7 @@ def get_monthly_data(year, month, user_id):
                     "protein": row[3],
                     "fat": row[4],
                     "carbohydrates": row[5],
-                    "calories": row[6]
+                    "calories": row[6],
                 }
                 foods_list[day].append(food_info)
 
@@ -705,32 +741,47 @@ def get_monthly_data(year, month, user_id):
             for day in range(num_days):
                 date_str = f"{year}-{str(month).zfill(2)}-{str(day+1).zfill(2)}"  # 1-based day for dates
                 daily_totals = get_daily_totals(user_id, date_str)
-             
+
                 if daily_totals:
-                    carb_total, protein_total, fat_total, rd_carb, rd_protein, rd_fat = daily_totals
-                    logging.debug(f"Daily Totals for {date_str}: {carb_total}, {protein_total}, {fat_total}, {rd_carb}, {rd_protein}, {rd_fat}")
-                    
+                    (
+                        carb_total,
+                        protein_total,
+                        fat_total,
+                        rd_carb,
+                        rd_protein,
+                        rd_fat,
+                    ) = daily_totals
+                    logging.debug(
+                        f"Daily Totals for {date_str}: {carb_total}, {protein_total}, {fat_total}, {rd_carb}, {rd_protein}, {rd_fat}"
+                    )
+
                     percentages_list[day] = {
-                        "carbohydrates_percentage": round((carb_total / rd_carb) * 100, 1) if rd_carb > 0 else 0,
-                        "protein_percentage": round((protein_total / rd_protein) * 100, 1) if rd_protein > 0 else 0,
-                        "fat_percentage": round((fat_total / rd_fat) * 100, 1) if rd_fat > 0 else 0
+                        "carbohydrates_percentage": (
+                            round((carb_total / rd_carb) * 100, 1) if rd_carb > 0 else 0
+                        ),
+                        "protein_percentage": (
+                            round((protein_total / rd_protein) * 100, 1)
+                            if rd_protein > 0
+                            else 0
+                        ),
+                        "fat_percentage": (
+                            round((fat_total / rd_fat) * 100, 1) if rd_fat > 0 else 0
+                        ),
                     }
 
-            return {
-                "foods": foods_list,
-                "percentages": percentages_list
-            }
+            return {"foods": foods_list, "percentages": percentages_list}
     except pymysql.MySQLError as e:
         logging.error(f"Database error: {e}")
         return {"error": "Database error"}
     finally:
         connection.close()
 
-@app.route('/api/food/quarterly', methods=['POST'])
+
+@app.route("/api/food/quarterly", methods=["POST"])
 def get_quarterly_food():
     data = request.json
     year = data.get("year")
-    start_month= data.get("month")
+    start_month = data.get("month")
     user_id = data.get("UID")
 
     if not year or not start_month or not user_id:
@@ -740,7 +791,12 @@ def get_quarterly_food():
         year = int(year)
         start_month = int(start_month)
         if start_month < 1 or start_month > 12:
-            return jsonify({"error": "Invalid month. Please enter a value between 1 and 12."}), 400
+            return (
+                jsonify(
+                    {"error": "Invalid month. Please enter a value between 1 and 12."}
+                ),
+                400,
+            )
     except ValueError:
         return jsonify({"error": "Year and month must be integers."}), 400
 
@@ -753,47 +809,64 @@ def get_quarterly_food():
 
     return jsonify(quarterly_data)
 
+
 def get_advice(carbohydrates_percentage, protein_percentage, fat_percentage):
     try:
         # Chat API 호출
         messages = [
-            SystemMessage(content="You are a nutrition expert providing dietary advice based on user's nutrient intake.Give 5 sentences of advice in Korean"),
-            HumanMessage(content=f"Here are my monthly nutrient intake percentages:\n"
-                                 f"Carbohydrates: {carbohydrates_percentage}%\n"
-                                 f"Protein: {protein_percentage}%\n"
-                                 f"Fat: {fat_percentage}%\n"
-                                 f"Please provide advice on how to improve my diet")
+            SystemMessage(
+                content="You are a nutrition expert providing dietary advice based on user's nutrient intake.Give 5 sentences of advice in Korean"
+            ),
+            HumanMessage(
+                content=f"Here are my monthly nutrient intake percentages:\n"
+                f"Carbohydrates: {carbohydrates_percentage}%\n"
+                f"Protein: {protein_percentage}%\n"
+                f"Fat: {fat_percentage}%\n"
+                f"Please provide advice on how to improve my diet"
+            ),
         ]
-        
+
         response = model(messages)
-        
+
         # 응답 객체의 내용을 로그로 출력
         logging.debug(f"LLM Response Object: {response}")
-        
+
         # 응답 내용을 추출
-        response_content = response[0].content if isinstance(response, list) else response.content
-        logging.debug(f"LLM Response Content: {response_content}")  # LLM 응답을 콘솔에 출력
+        response_content = (
+            response[0].content if isinstance(response, list) else response.content
+        )
+        logging.debug(
+            f"LLM Response Content: {response_content}"
+        )  # LLM 응답을 콘솔에 출력
         return response_content
     except Exception as e:
         logging.error(f"Error in get_advice: {e}")
-        logging.debug(f"Carbohydrates: {carbohydrates_percentage}, Protein: {protein_percentage}, Fat: {fat_percentage}")  # 입력 데이터 디버깅
+        logging.debug(
+            f"Carbohydrates: {carbohydrates_percentage}, Protein: {protein_percentage}, Fat: {fat_percentage}"
+        )  # 입력 데이터 디버깅
         return {"error": f"Failed to get advice from LLM: {str(e)}"}
-    
-@app.route('/api/food/advice', methods=['POST'])
+
+
+@app.route("/api/food/advice", methods=["POST"])
 def get_advice_route():
     data = request.json
     year = data.get("year")
     month = data.get("month")
-    user_id  = data.get("UID")
+    user_id = data.get("UID")
     if not year or not month or not user_id:
         return jsonify({"error": "Year, month, and user_id are required"}), 400
 
     try:
         year = int(year)
         month = int(month)
-    
+
         if month < 1 or month > 12:
-            return jsonify({"error": "Invalid month. Please enter a value between 1 and 12."}), 400
+            return (
+                jsonify(
+                    {"error": "Invalid month. Please enter a value between 1 and 12."}
+                ),
+                400,
+            )
     except ValueError:
         return jsonify({"error": "Year and month must be integers."}), 400
 
@@ -805,7 +878,7 @@ def get_advice_route():
         return jsonify(monthly_data), 500
     # print("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@")
     # print(monthly_data)
-    percentages_list = monthly_data['percentages']
+    percentages_list = monthly_data["percentages"]
 
     # 한 달치 평균 계산
     total_carbs = 0
@@ -816,9 +889,9 @@ def get_advice_route():
     # print(percentages_list)
     for day_data in percentages_list:
         if day_data:  # 빈 데이터는 건너뜀
-            total_carbs += day_data.get('carbohydrates_percentage', 0)
-            total_protein += day_data.get('protein_percentage', 0)
-            total_fat += day_data.get('fat_percentage', 0)
+            total_carbs += day_data.get("carbohydrates_percentage", 0)
+            total_protein += day_data.get("protein_percentage", 0)
+            total_fat += day_data.get("fat_percentage", 0)
             count += 1
 
     if count == 0:
@@ -833,20 +906,23 @@ def get_advice_route():
     averages = {
         "average_carbohydrates_percentage": round(average_carbs, 1),
         "average_protein_percentage": round(average_protein, 1),
-        "average_fat_percentage": round(average_fat, 1)
+        "average_fat_percentage": round(average_fat, 1),
     }
     print(3)
 
     # LLM을 통해 조언을 받습니다
-    advice = get_advice(averages["average_carbohydrates_percentage"],
-                        averages["average_protein_percentage"],
-                        averages["average_fat_percentage"])
+    advice = get_advice(
+        averages["average_carbohydrates_percentage"],
+        averages["average_protein_percentage"],
+        averages["average_fat_percentage"],
+    )
     print(4)
 
     # 콘솔에 출력
     logging.debug(f"LLM Advice: {advice}")
 
     return jsonify({"averages": averages, "advice": advice})
+
 
 def get_user_nutritional_needs(user_id):
     connection = pymysql.connect(**db_config)
@@ -866,6 +942,7 @@ def get_user_nutritional_needs(user_id):
     finally:
         connection.close()
 
+
 def get_daily_totals(user_id, date):
     connection = pymysql.connect(**db_config)
     try:
@@ -883,12 +960,13 @@ def get_daily_totals(user_id, date):
     finally:
         connection.close()
 
+
 def get_foods_by_date(year, month, day, user_id):
     connection = pymysql.connect(**db_config)
     try:
         with connection.cursor() as cursor:
             sql = """
-                SELECT DATE, FOOD_INDEX, FOOD_NAME, FOOD_PT, FOOD_FAT, FOOD_CH, FOOD_KCAL
+                SELECT DATE, FOOD_INDEX, FOOD_NAME, FOOD_PT, FOOD_FAT, FOOGD_CH, FOOD_KCAL
                 FROM FOOD
                 WHERE YEAR(DATE) = %s AND MONTH(DATE) = %s AND DAY(DATE) = %s AND ID = %s
                 ORDER BY DATE
@@ -896,7 +974,11 @@ def get_foods_by_date(year, month, day, user_id):
             cursor.execute(sql, (year, month, day, user_id))
             results = cursor.fetchall()
             foods_list = []  # 특정 날짜의 음식 리스트
-            percentages = {"carbohydrates_percentage": 0, "protein_percentage": 0, "fat_percentage": 0}  # 기본값 0으로 설정
+            percentages = {
+                "carbohydrates_percentage": 0,
+                "protein_percentage": 0,
+                "fat_percentage": 0,
+            }  # 기본값 0으로 설정
 
             for row in results:
                 food_info = {
@@ -905,38 +987,48 @@ def get_foods_by_date(year, month, day, user_id):
                     "protein": row[3],
                     "fat": row[4],
                     "carbohydrates": row[5],
-                    "calories": row[6]
+                    "calories": row[6],
                 }
                 foods_list.append(food_info)
 
             # Add daily percentages
-            date_str = f"{year}-{str(month).zfill(2)}-{str(day).zfill(2)}"  # 날짜 문자열
+            date_str = (
+                f"{year}-{str(month).zfill(2)}-{str(day).zfill(2)}"  # 날짜 문자열
+            )
             daily_totals = get_daily_totals(user_id, date_str)
             if daily_totals:
-                carb_total, protein_total, fat_total, rd_carb, rd_protein, rd_fat = daily_totals
+                carb_total, protein_total, fat_total, rd_carb, rd_protein, rd_fat = (
+                    daily_totals
+                )
                 percentages = {
-                    "carbohydrates_percentage": round((carb_total / rd_carb) * 100, 1) if rd_carb > 0 else 0,
-                    "protein_percentage": round((protein_total / rd_protein) * 100, 1) if rd_protein > 0 else 0,
-                    "fat_percentage": round((fat_total / rd_fat) * 100, 1) if rd_fat > 0 else 0
+                    "carbohydrates_percentage": (
+                        round((carb_total / rd_carb) * 100, 1) if rd_carb > 0 else 0
+                    ),
+                    "protein_percentage": (
+                        round((protein_total / rd_protein) * 100, 1)
+                        if rd_protein > 0
+                        else 0
+                    ),
+                    "fat_percentage": (
+                        round((fat_total / rd_fat) * 100, 1) if rd_fat > 0 else 0
+                    ),
                 }
 
-            return {
-                "foods": foods_list,
-                "percentages": percentages
-            }
+            return {"foods": foods_list, "percentages": percentages}
     except pymysql.MySQLError as e:
         logging.error(f"Database error: {e}")
         return {"error": "Database error"}
     finally:
         connection.close()
 
-@app.route('/api/food/get_day', methods=['POST'])
+
+@app.route("/api/food/get_day", methods=["POST"])
 def get_day_food():
     data = request.json
-    year = data.get('year')
-    month = data.get('month')
-    day = data.get('day')
-    user_id = data.get('UID')
+    year = data.get("year")
+    month = data.get("month")
+    day = data.get("day")
+    user_id = data.get("UID")
     print(data)
     if not year or not month or not day or not user_id:
         return jsonify({"error": "Year, month, day, and user_id are required"}), 400
@@ -945,9 +1037,12 @@ def get_day_food():
         year = int(year)
         month = int(month)
         day = int(day)
-        print(year,month,day)
+        print(year, month, day)
         if month < 1 or month > 12 or day < 1 or day > 31:
-            return jsonify({"error": "Invalid month or day. Please enter valid values."}), 400
+            return (
+                jsonify({"error": "Invalid month or day. Please enter valid values."}),
+                400,
+            )
     except ValueError:
         return jsonify({"error": "Year, month, and day must be integers."}), 400
 
@@ -957,7 +1052,6 @@ def get_day_food():
         return jsonify(daily_data), 500
 
     return jsonify(daily_data)
-
 
 
 if __name__ == "__main__":
