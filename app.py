@@ -1100,7 +1100,7 @@ def upload():
             return jsonify(nutrition_info), 400
 
         try:
-            save_to_db(user_id, nutrition_info)
+            # save_to_db(user_id, nutrition_info)
             app.logger.info("Data saved to database")
         except Exception as e:
             app.logger.error(f"Error saving to database: {e}")
