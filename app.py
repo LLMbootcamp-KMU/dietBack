@@ -365,26 +365,31 @@ def update_food():
 @app.route("/api/register", methods=["GET", "POST", "PUT"])
 def register():
     if request.method == "GET":
+        print(1)
         user_id = request.args.get("id")
         if not user_id:
             return jsonify({"error": "User ID is required"}), 400
 
         connection = create_db_connection()
+        print(2)
         if connection is None:
             return jsonify({"error": "Database connection failed"}), 500
 
         try:
+            print(3)
             cursor = connection.cursor()
             query_nutrients = (
                 """SELECT RD_PROTEIN, RD_CARBO, RD_FAT FROM USER_NT WHERE ID=%s"""
             )
+            print(4)
             cursor.execute(query_nutrients, (user_id,))
             nutrients_result = cursor.fetchone()
-
+            print(5)
             if nutrients_result is None:
                 return jsonify({"error": "User NT not found"}), 404
 
             rd_protein, rd_carbo, rd_fat = nutrients_result
+            print(6)
             return (
                 jsonify(
                     {
