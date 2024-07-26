@@ -379,7 +379,7 @@ def register():
             print(2)
             cursor = connection.cursor()
             query_nutrients = (
-                """SELECT RD_PROTEIN, RD_CARBO, RD_FAT FROM USER WHERE ID=%s"""
+                """SELECT RD_PROTEIN1, RD_CARBO1, RD_FAT1 FROM USER WHERE ID=%s"""
             )
             cursor.execute(query_nutrients, (user_id,))
             nutrients_result = cursor.fetchone()
@@ -392,9 +392,9 @@ def register():
             return (
                 jsonify(
                     {
-                        "RD_PROTEIN": rd_protein,
-                        "RD_CARBO": rd_carbo,
-                        "RD_FAT": rd_fat,
+                        "RD_PROTEIN1": rd_protein,
+                        "RD_CARBO1": rd_carbo,
+                        "RD_FAT1": rd_fat,
                     }
                 ),
                 200,
@@ -431,7 +431,7 @@ def register():
             )
             cursor.execute(query_user, values_user)
 
-            query_nt = """UPDATE USER_NT SET RD_PROTEIN=%s, RD_CARBO=%s, RD_FAT=%s WHERE ID=%s"""
+            query_nt = """UPDATE USER SET RD_PROTEIN1=%s, RD_CARBO1=%s, RD_FAT1=%s WHERE ID=%s"""
             values_nt = (
                 data["rd_protein"],
                 data["rd_carbo"],
@@ -454,7 +454,7 @@ def register():
             )
             cursor.execute(query_user, values_user)
 
-            query_nt = """INSERT INTO USER_NT (ID, RD_PROTEIN, RD_CARBO, RD_FAT) 
+            query_nt = """INSERT INTO USER (ID, RD_PROTEIN1, RD_CARBO1, RD_FAT1) 
                           VALUES (%s, %s, %s, %s)"""
             values_nt = (
                 data["id"],
