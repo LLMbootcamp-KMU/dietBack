@@ -1058,7 +1058,7 @@ def get_day_food():
 
     return jsonify(daily_data)
 
-UPLOAD_FOLDER = '/path/to/upload'  # 실제 경로로 설정
+UPLOAD_FOLDER = './path/to/upload'  # 실제 경로로 설정
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
     
