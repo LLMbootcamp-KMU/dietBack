@@ -8,12 +8,12 @@ import mysql.connector
 from mysql.connector import Error
 from dotenv import load_dotenv
 import os
-import llm
 import calendar
 import pymysql
 from datetime import datetime
 import logging
-
+import uuid  # uuid 모듈을 임포트합니다.
+import jun
 from langchain.chat_models import AzureChatOpenAI
 from langchain.schema import HumanMessage, SystemMessage
 
@@ -1058,6 +1058,55 @@ def get_day_food():
 
     return jsonify(daily_data)
 
+UPLOAD_FOLDER = '/path/to/upload'  # 실제 경로로 설정
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
+    
+@app.route('/api/upload', methods=['POST'])
+def upload():
+    user_id = request.form.get('user_id')
+    app.logger.debug(f"User ID: {user_id}")
+
+    if 'file' not in request.files:
+        app.logger.error("No file part")
+        return jsonify({"error": "No file part"}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        app.logger.error("No selected file")
+        return jsonify({"error": "No selected file"}), 400
+
+    if file:
+        file_extension = os.path.splitext(file.filename)[1]
+        safe_filename = f"{uuid.uuid4().hex}{file_extension}"
+        file_path = os.path.join(UPLOAD_FOLDER, safe_filename)
+        
+        try:
+            file.save(file_path)
+            app.logger.info(f"File saved to {file_path}")
+        except Exception as e:
+            app.logger.error(f"Error saving file: {e}")
+            return jsonify({"error": str(e)}), 500
+
+        try:
+            nutrition_info = jun.do(file_path)
+            app.logger.info(f"Nutrition info: {nutrition_info}")
+        except Exception as e:
+            app.logger.error(f"Error processing file: {e}")
+            return jsonify({"error": "Error processing file", "details": str(e)}), 500
+
+        if 'error' in nutrition_info:
+            app.logger.error(f"Nutrition info error: {nutrition_info}")
+            return jsonify(nutrition_info), 400
+
+        try:
+            save_to_db(user_id, nutrition_info)
+            app.logger.info("Data saved to database")
+        except Exception as e:
+            app.logger.error(f"Error saving to database: {e}")
+            return jsonify({"error": "Error saving to database", "details": str(e)}), 500
+
+        return jsonify(nutrition_info)
 
 if __name__ == "__main__":
     print("Starting Flask application")  # 디버깅 메시지
